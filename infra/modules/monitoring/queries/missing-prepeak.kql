@@ -1,0 +1,14 @@
+// Expected job 07:35; check only 07:45-07:55 on weekdays, including DST.
+// Alert window 15m includes the expected report. A stale/yesterday report cannot satisfy it.
+let LocalNow = datetime_utc_to_local(now(), '${timezone}');
+let InWindow = dayofweek(LocalNow) between (1d .. 5d)
+    and (LocalNow - startofday(LocalNow)) between (7h45m .. 7h55m);
+AzureDiagnostics
+| where _ResourceId =~ '${account_id}'
+| where Category == 'JobStreams' and StreamType_s == 'Output'
+| where RunbookName_s == 'Invoke-AvdAudit'
+| extend Report = parse_json(ResultDescription)
+| where tostring(Report.schemaVersion) == '1.0' and tostring(Report.mode) == 'PrePeak'
+| where todatetime(Report.completedUtc) > ago(30m)
+| summarize Reports = count()
+| where InWindow and Reports == 0

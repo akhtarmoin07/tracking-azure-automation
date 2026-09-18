@@ -1,0 +1,22 @@
+// Run each query independently in the deployed Log Analytics workspace.
+// Filter _ResourceId to the specific lab host pool when sharing a workspace.
+// CorrelationId measures connection establishment, not full shell/app readiness.
+WVDConnections
+| where TimeGenerated > ago(7d)
+| summarize Started=minif(TimeGenerated, State == 'Started'), Connected=minif(TimeGenerated, State == 'Connected') by CorrelationId
+| where isnotnull(Started) and isnotnull(Connected) and Connected >= Started
+| extend ConnectionSeconds=datetime_diff('second',Connected,Started)
+| summarize p50=percentile(ConnectionSeconds,50), p95=percentile(ConnectionSeconds,95), Connections=count() by bin(Started,1h)
+
+Perf
+| where TimeGenerated > ago(24h)
+| where CounterName in ('% Processor Time','Available MBytes','Active Sessions','Inactive Sessions','Max Input Delay')
+| summarize Average=avg(CounterValue), P95=percentile(CounterValue,95), Peak=max(CounterValue) by Computer, CounterName, bin(TimeGenerated,15m)
+
+StorageFileLogs
+| where TimeGenerated > ago(24h)
+| summarize Requests=count(), P95ServerMs=percentile(ServerLatencyMs,95), P95TotalMs=percentile(DurationMs,95) by StatusText, bin(TimeGenerated,15m)
+
+Event
+| where TimeGenerated > ago(24h) and Source == 'SPORTFIVE-AVD-Health'
+| summarize LastReport=max(TimeGenerated) by Computer

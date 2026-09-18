@@ -1,0 +1,122 @@
+name: Reviewed deployment
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [lab]
+        default: lab
+        description: Lab settings committed in infra/terraform.tfvars and infra/backend.tf
+      apply:
+        type: boolean
+        default: false
+        description: Apply the saved plan after environment review
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: sportfive-${{ inputs.environment }}
+  cancel-in-progress: false
+env:
+  TF_IN_AUTOMATION: 'true'
+  ARM_USE_OIDC: 'true'
+jobs:
+  checks:
+    uses: ./.github/workflows/validate.yml
+  plan:
+    needs: checks
+    if: github.ref == 'refs/heads/main'
+    environment: ${{ inputs.environment }}-plan
+    runs-on: ubuntu-latest
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_admin_password: ${{ secrets.VM_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Check committed configuration and credentials
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in 'ARM_CLIENT_ID','ARM_TENANT_ID','ARM_SUBSCRIPTION_ID','TF_VAR_admin_password') {
+            if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Missing $name in GitHub variables/secrets." }
+          }
+          if (Select-String -Path infra/terraform.tfvars -Pattern '"[^"\r\n]*REPLACE' -Quiet) { throw 'Fill the REPLACE values in infra/terraform.tfvars before deploying.' }
+      - run: terraform -chdir=infra init -input=false -lockfile=readonly
+      - run: terraform -chdir=infra validate
+      - name: Resolve dates and check Azure prerequisites
+        shell: pwsh
+        run: |
+          ./scripts/deployment/Prepare-TerraformConfiguration.ps1 -InfraDirectory infra -OutputPath artifacts/resolved.tfvars.json -ActivationOutputPath artifacts/activation.tfvars.json
+          ./scripts/deployment/Test-AzurePrerequisites.ps1 -ConfigPath artifacts/resolved.tfvars.json -ReportPath artifacts/preflight.json
+      - name: Plan and reject destructive changes
+        shell: pwsh
+        run: |
+          terraform -chdir=infra plan -input=false -var-file=../artifacts/resolved.tfvars.json -out=reviewed.tfplan
+          if ($LASTEXITCODE -ne 0) { throw 'Terraform plan failed.' }
+          Import-Module ./scripts/deployment/AzureDeployment.Core.psm1
+          $json = terraform -chdir=infra show -json reviewed.tfplan
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect saved plan.' }
+          Assert-AvdPlanHasNoDeletion ($json -join "`n" | ConvertFrom-Json -AsHashtable)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-plan
+          path: infra/reviewed.tfplan
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deployment-inputs
+          path: artifacts/*.json
+          retention-days: 1
+  apply:
+    needs: plan
+    if: inputs.apply && github.ref == 'refs/heads/main'
+    # Configure REQUIRED REVIEWERS on lab/pilot/prod; GitHub does not infer them from YAML.
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_admin_password: ${{ secrets.VM_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: reviewed-plan
+          path: infra
+      - uses: actions/download-artifact@v4
+        with:
+          name: deployment-inputs
+          path: artifacts
+      - run: terraform -chdir=infra init -input=false -lockfile=readonly
+      - run: terraform -chdir=infra apply -input=false reviewed.tfplan
+      - name: Prepare profiles, verify runtime and activate requested access
+        shell: pwsh
+        run: |
+          ./scripts/deployment/Complete-Deployment.ps1 -InfraDirectory infra -ArtifactDirectory artifacts -ActivationConfigPath artifacts/activation.tfvars.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deployment-evidence
+          path: artifacts/*.json
+          retention-days: 7
