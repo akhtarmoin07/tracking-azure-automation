@@ -42,7 +42,7 @@ Profile setup grants only the generated storage application's expected consent, 
 
 `enable_audit_schedules=true` requests automatic activation after checks. `enable_user_access=false` keeps publication off; after tenant setup, restrict the finance group to pilot members and set it true to request publication in the same flow, with an SSO configuration check. Expand membership only after acceptance. Only expected access/schedule/alert changes are permitted in the activation plan.
 
-For GitHub, set variables **AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID** and secret **VM_ADMIN_PASSWORD**, available to both jobs. There is no `TF_BACKEND` or `TF_CONFIG_JSON`. Configure OIDC subjects for `lab-plan`/`lab`, required reviewers on `lab`, protected `main`, and a runner able to reach the backend. Dispatch the deployment workflow; apply defaults off. Saved plans contain secrets and expire after one day. Offline validation is reusable and runs first.
+For GitHub, set variables **AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID** and secret **VM_ADMIN_PASSWORD**, available to plan/apply jobs. There is no `TF_BACKEND` or `TF_CONFIG_JSON`. Configure OIDC subjects for `lab-plan`/`lab`, required reviewers on `lab`, protected `main`, and a runner able to reach the backend. The single workflow runs only through **Actions → SPORTFIVE deployment → Run workflow**; checks run first and apply defaults off. Pushes and pull requests do not trigger runs. Dependabot configuration is removed. Remove any obsolete required `Validate` status check from branch protection. Saved plans contain secrets and expire after one day.
 
 ## Operation and acceptance
 

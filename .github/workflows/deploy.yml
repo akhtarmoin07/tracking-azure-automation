@@ -1,4 +1,4 @@
-name: Reviewed deployment
+name: SPORTFIVE deployment
 on:
   workflow_dispatch:
     inputs:
@@ -21,10 +21,33 @@ env:
   TF_IN_AUTOMATION: 'true'
   ARM_USE_OIDC: 'true'
 jobs:
-  checks:
-    uses: ./.github/workflows/validate.yml
+  terraform-checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.6
+      - run: terraform -chdir=infra fmt -check -recursive
+      - run: terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
+      - run: terraform -chdir=infra validate
+      - run: terraform -chdir=infra test -no-color
+  powershell-checks:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned analyzer
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force
+      - name: Check PowerShell
+        shell: pwsh
+        run: ./scripts/Test-Repository.ps1 -Analyze
   plan:
-    needs: checks
+    needs: [terraform-checks, powershell-checks]
     if: github.ref == 'refs/heads/main'
     environment: ${{ inputs.environment }}-plan
     runs-on: ubuntu-latest
