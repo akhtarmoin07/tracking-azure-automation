@@ -68,12 +68,12 @@ jobs:
           $json = terraform -chdir=infra show -json reviewed.tfplan
           if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect saved plan.' }
           Assert-AvdPlanHasNoDeletion ($json -join "`n" | ConvertFrom-Json -AsHashtable)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: reviewed-plan
           path: infra/reviewed.tfplan
           retention-days: 1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: deployment-inputs
           path: artifacts/*.json
@@ -114,7 +114,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/deployment/Complete-Deployment.ps1 -InfraDirectory infra -ArtifactDirectory artifacts -ActivationConfigPath artifacts/activation.tfvars.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: deployment-evidence
