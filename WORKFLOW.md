@@ -9,12 +9,14 @@ flowchart TB
     Git --> Checks
     Checks --> Plan["Saved Terraform plan<br/>Reject deletions and replacements"]
     Plan --> Apply["Apply: 8 modules in one state<br/>Network · AVD · Profiles · Hosts<br/>Autoscale · Automation · Backup · Monitoring"]
+    Apply <-->|"state / lease locking"| State["Existing Azure Blob backend<br/>statetfmoin / tfstate"]
     Apply --> Bootstrap["Entra join + pinned agent/FSLogix<br/>AMA + local health task"]
     Bootstrap --> Profiles["Storage app consent / private-link names<br/>Group claims + empty-share ACL setup<br/>Temporary privilege revoked"]
     Profiles --> Verify["Verify bootstrap, registration,<br/>managed-identity audit and log ingestion"]
+    Verify -->|"failed check"| Stop["Stop before first publication<br/>Retain resources and failure evidence"]
     Tenant["Tenant prerequisites<br/>Groups, licenses, CA policy, SSO"] --> Profiles
     Tenant --> Publish
-    Verify --> Publish["Restricted activation plan<br/>Enable requested audits and desktop access<br/>Publication defaults off"]
+    Verify -->|"passed checks"| Publish["Restricted activation plan<br/>Enable requested audits and desktop access<br/>Publication defaults off"]
     Publish --> Evidence["Completion and runtime reports<br/>Pilot: sign-in, isolation, load, restore"]
   end
 
@@ -24,7 +26,7 @@ flowchart TB
     Pool --> Hosts["31 planned private Windows 11 hosts<br/>5 sessions/host + one-host reserve"]
     Hosts -->|"SMB / Kerberos"| Private["Private DNS + Files endpoint"]
     Private --> Files["Same-region Premium Azure Files<br/>FSLogix profiles · 5625 GiB"]
-    Scale["Native autoscale<br/>07:00 warm · 08:00 breadth-first<br/>18:00 depth-first · 20:00 empty hosts off"] --> Hosts
+    Scale["Native autoscale<br/>07:00 warm · 08:00 breadth-first<br/>18:00 depth-first · 20:00 off-peak<br/>Only empty hosts deallocate"] -.-> Hosts
     Audit["Automation / Reader identity<br/>07:35 readiness · 20:30 off-peak<br/>Heartbeat freshness warns separately"] -.->|"read-only checks"| Pool
     Audit -.->|"read-only checks"| Hosts
     Hosts -->|"AMA + DCR / health events"| Logs["Log Analytics / AVD Insights"]
